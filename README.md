@@ -2,11 +2,9 @@
 
 **LingNav** is a dual-system visual language navigation framework combining **Qwen3-VL (S2)** for language-grounded waypoint reasoning and **NavDP (S1)** for low-level motion control — designed for real-world robot deployment on Jetson edge hardware.
 
-LingNav 独立部署框架：基于 Qwen3-VL（S2 语言推理）+ NavDP（S1 运动控制）的双系统室内导航方案。
-
 ---
 
-## 系统架构
+## System Architecture
 
 ```mermaid
 graph TB
@@ -38,7 +36,7 @@ graph TB
     PIPE <-->|"HTTP REST (LAN)"| S2Srv
 ```
 
-### 数据流时序
+### Navigation Loop
 
 ```mermaid
 sequenceDiagram
@@ -48,138 +46,136 @@ sequenceDiagram
     participant S1 as S1 NavDP Policy
     participant Robot as Robot Actuator
 
-    loop 导航循环 (每帧)
-        Cam->>ROS: RGB 图像帧
+    loop Per Frame
+        Cam->>ROS: RGB image frame
         ROS->>S2: POST /navigate<br/>{image, instruction}
-        S2->>S2: VLM 推理<br/>→ 局部路点 (x, y, θ)
-        S2-->>ROS: Waypoint Response
-        ROS->>S1: 点目标 (point goal)
-        S1->>S1: 策略推理
-        S1-->>ROS: 动作 (v, ω)
-        ROS->>Robot: MPC/PID 执行控制
+        S2->>S2: VLM reasoning<br/>→ local waypoint (x, y, θ)
+        S2-->>ROS: Waypoint response
+        ROS->>S1: Point goal
+        S1->>S1: Policy inference
+        S1-->>ROS: Action (v, ω)
+        ROS->>Robot: MPC / PID execution
     end
 ```
 
-### 部署模式
+### Deployment Modes
 
 ```mermaid
 graph LR
-    subgraph Mode1["模式 A：本地 S1（推荐）"]
+    subgraph Mode1["Mode A: Local S1 (Recommended)"]
         direction LR
-        J1["Jetson"] -- "本地推理" --> N1["NavDP (--local_s1)"]
+        J1["Jetson"] -- "local inference" --> N1["NavDP (--local_s1)"]
         J1 <-- "HTTP :8890" --> G1["GPU Server (S2)"]
     end
 
-    subgraph Mode2["模式 B：远程 S1"]
+    subgraph Mode2["Mode B: Remote S1"]
         direction LR
         J2["Jetson"] <-- "HTTP :8901" --> N2["NavDP Server (--s1_host)"]
         J2 <-- "HTTP :8890" --> G2["GPU Server (S2)"]
     end
 
-    subgraph Mode3["模式 C：仅 S2 测试"]
+    subgraph Mode3["Mode C: S2-only Testing"]
         direction LR
-        PC["开发机"] -- "--skip_s1" --> G3["GPU Server (S2)"]
+        PC["Dev Machine"] -- "--skip_s1" --> G3["GPU Server (S2)"]
     end
 ```
 
 ---
 
-## 项目结构
+## Project Structure
 
 ```
 LingNav/
-├── lingnav/                        # Python 包（pip install -e . 安装）
+├── lingnav/                        # Python package (pip install -e .)
 │   ├── server/
-│   │   └── s2_server.py           # S2：Qwen3-VL HTTP 服务器（端口 8890）
+│   │   └── s2_server.py           # S2: Qwen3-VL HTTP server (port 8890)
 │   ├── clients/
-│   │   ├── navdp_client.py        # HTTP S1 客户端
-│   │   └── navdp_local_client.py  # 本地 S1 推理（可替换 HTTP 客户端）
+│   │   ├── navdp_client.py        # HTTP S1 client
+│   │   └── navdp_local_client.py  # Local S1 inference (replaces HTTP client)
 │   ├── core/
-│   │   ├── pipeline.py            # S2+S1 协调调度（LingNavPipeline 类）
-│   │   └── navdp_agent.py         # NavDP_Policy 封装
+│   │   ├── pipeline.py            # S2+S1 orchestration (LingNavPipeline)
+│   │   └── navdp_agent.py         # NavDP_Policy wrapper
 │   ├── robot/
-│   │   ├── ros_client.py          # Jetson ROS2 节点（规划线程 + 控制线程）
-│   │   └── controllers.py         # MPC + PID 控制器（CasADi）
+│   │   ├── ros_client.py          # Jetson ROS2 node (planning + control threads)
+│   │   └── controllers.py         # MPC + PID controllers (CasADi)
 │   └── utils/
-│       └── thread_utils.py        # 读写锁（ReadWriteLock）
+│       └── thread_utils.py        # ReadWriteLock
 ├── tests/
-│   └── test_s2_client.py          # S2 独立测试客户端
+│   └── test_s2_client.py          # S2 standalone test client
 ├── scripts/
-│   ├── start_s2_server.sh         # GPU 服务器启动脚本
-│   └── start_jetson.sh            # Jetson 端启动脚本
+│   ├── start_s2_server.sh         # GPU server launch script
+│   └── start_jetson.sh            # Jetson launch script
 ├── setup.py
-├── requirements_server.txt        # GPU 服务器依赖
-└── requirements_jetson.txt        # Jetson 边缘端依赖
+├── requirements_server.txt        # GPU server dependencies
+└── requirements_jetson.txt        # Jetson edge dependencies
 ```
 
-**NavDP 依赖**：`navdp_agent.py` 默认从 LingNav **上一级目录**的 `NavDP/` 加载 `NavDP_Policy`（来自 [InternRobotics/NavDP](https://github.com/InternRobotics/NavDP)）。
-例如 LingNav 在 `~/VLN/LingNav`，则 NavDP 应在 `~/VLN/NavDP`。
-可通过环境变量覆盖：`NAVDP_ROOT=/path/to/NavDP`。
+**NavDP dependency**: `navdp_agent.py` loads `NavDP_Policy` from a `NavDP/` directory that is a sibling of `LingNav/` (from [InternRobotics/NavDP](https://github.com/InternRobotics/NavDP)).
+For example, if LingNav is at `~/VLN/LingNav`, then NavDP should be at `~/VLN/NavDP`.
+Override with the environment variable: `NAVDP_ROOT=/path/to/NavDP`.
 
 ---
 
-## 环境安装
+## Installation
 
-### S2 服务器环境（GPU 机器，运行 Qwen3-VL）
+### S2 Server (GPU machine running Qwen3-VL)
 
-参考：[QwenLM/Qwen3-VL](https://github.com/QwenLM/Qwen3-VL)
+Reference: [QwenLM/Qwen3-VL](https://github.com/QwenLM/Qwen3-VL)
 
 ```bash
 conda create -n qwen3vl python=3.10
 conda activate qwen3vl
 
-# clone Qwen3-VL（获取工具脚本）
+# Clone Qwen3-VL (for utility scripts)
 git clone https://github.com/QwenLM/Qwen3-VL
 cd Qwen3-VL
 
-# 安装 PyTorch（根据 CUDA 版本选择，示例为 CUDA 12.1）
+# Install PyTorch (adjust for your CUDA version; example: CUDA 12.1)
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 
-# 安装 LingNav S2 依赖
+# Install LingNav S2 dependencies
 cd /path/to/LingNav
 pip install -r requirements_server.txt
 
-# 可选：Flash Attention 加速推理
+# Optional: Flash Attention for faster inference
 pip install flash-attn --no-build-isolation
 
-# 下载模型权重（Hugging Face）
+# Download model weights (Hugging Face)
 huggingface-cli download Qwen/Qwen3-VL-8B-Instruct --local-dir /path/to/Qwen3-VL-8B-Instruct
-# 或使用 ModelScope（国内推荐）
-# modelscope download --model Qwen/Qwen3-VL-8B-Instruct --local_dir /path/to/Qwen3-VL-8B-Instruct
 ```
 
-### Jetson 边缘端环境（运行 NavDP S1）
+### S1 Edge (Jetson running NavDP)
 
-参考：[InternRobotics/NavDP](https://github.com/InternRobotics/NavDP)
+Reference: [InternRobotics/NavDP](https://github.com/InternRobotics/NavDP)
 
 ```bash
 conda create -n navdp python=3.10
 conda activate navdp
 
-# clone NavDP（与 LingNav 同级目录）
+# Clone NavDP as a sibling of LingNav
 cd ~/VLN
 git clone https://github.com/InternRobotics/NavDP
 
-# 安装 Jetson 专用 PyTorch / Torchvision（预编译 aarch64 wheel）
+# Install Jetson-specific PyTorch / Torchvision (prebuilt aarch64 wheel)
 pip install /home/wheeltec/torchvision-0.21.0-cp310-cp310-linux_aarch64.whl
 
-# 安装 NavDP 模型依赖
+# Install NavDP model dependencies
 cd ~/VLN/NavDP/baselines/navdp
 pip install -r requirements.txt
 
-# 安装 LingNav Jetson 依赖
+# Install LingNav Jetson dependencies
 cd ~/VLN/LingNav
 pip install -r requirements_jetson.txt
 
-# ROS2 相关（apt 安装）
+# ROS2 packages
 sudo apt install ros-humble-cv-bridge ros-humble-message-filters
 ```
 
 ---
 
-## 快速开始
+## Quick Start
 
-### 1. 启动 S2 服务器（GPU 机器）
+### 1. Start the S2 server (GPU machine)
 
 ```bash
 conda activate qwen3vl
@@ -189,21 +185,21 @@ python -m lingnav.server.s2_server \
     --port 8890
 ```
 
-### 2. 测试 S2 连通性
+### 2. Test S2 connectivity
 
 ```bash
 conda activate qwen3vl
 
-# 随机图像（连通性测试）
+# Random image (connectivity test)
 python tests/test_s2_client.py --host 127.0.0.1 --port 8890 \
     --random --instruction "Go to the chair"
 
-# 真实图像
+# Real image
 python tests/test_s2_client.py --host 127.0.0.1 --port 8890 \
     --image /path/to/test.jpg --instruction "Go to the door"
 ```
 
-### 3. Pipeline 测试（仅 S2，跳过 S1）
+### 3. Pipeline test (S2 only, skip S1)
 
 ```bash
 conda activate qwen3vl
@@ -214,13 +210,13 @@ python -m lingnav.core.pipeline \
     --instruction "Turn left, go to the door"
 ```
 
-### 4. Jetson 完整部署（ROS2 + 本地 S1）
+### 4. Full Jetson deployment (ROS2 + local S1)
 
 ```bash
 conda activate navdp
 
 cd ~/VLN/LingNav
-# NavDP 默认从上一级目录的 NavDP/ 加载，无需 NAVDP_ROOT
+# NavDP is auto-detected from the sibling directory; no NAVDP_ROOT needed
 python -m lingnav.robot.ros_client \
     --instruction "Go to the black chair" \
     --s2_host 192.168.1.100 \
@@ -229,7 +225,7 @@ python -m lingnav.robot.ros_client \
     --s1_half
 ```
 
-### 5. Jetson 使用远程 S1 服务器
+### 5. Jetson with remote S1 server
 
 ```bash
 conda activate navdp
@@ -240,7 +236,7 @@ python -m lingnav.robot.ros_client \
     --s1_host 192.168.1.100 --s1_port 8901
 ```
 
-### 6. NavDP 本地导入测试
+### 6. Verify NavDP local import
 
 ```bash
 conda activate navdp
@@ -250,14 +246,14 @@ python -c "from lingnav.clients.navdp_local_client import NavDPLocalClient; prin
 
 ---
 
-## 相机内参
+## Camera Intrinsics
 
-| 相机 | 分辨率 | 常量名 |
-|------|--------|--------|
-| Gemini 336L（默认） | 1280×720 | `GEMINI_336L_INTRINSIC` |
+| Camera | Resolution | Constant |
+|--------|------------|----------|
+| Gemini 336L (default) | 1280×720 | `GEMINI_336L_INTRINSIC` |
 | Astra S | 640×480 | `ASTRA_S_INTRINSIC` |
 
-切换相机（S2 服务器）：
+Switch camera (S2 server):
 ```bash
 python -m lingnav.server.s2_server \
     --model_path /path/to/model \
@@ -267,7 +263,7 @@ python -m lingnav.server.s2_server \
 
 ---
 
-## 致谢
+## Acknowledgements
 
-- [QwenLM/Qwen3-VL](https://github.com/QwenLM/Qwen3-VL) — S2 视觉语言模型
-- [InternRobotics/NavDP](https://github.com/InternRobotics/NavDP) — S1 导航策略
+- [QwenLM/Qwen3-VL](https://github.com/QwenLM/Qwen3-VL) — S2 visual language model
+- [InternRobotics/NavDP](https://github.com/InternRobotics/NavDP) — S1 navigation policy
